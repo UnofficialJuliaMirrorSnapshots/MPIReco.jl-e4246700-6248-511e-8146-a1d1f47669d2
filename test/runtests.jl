@@ -52,6 +52,7 @@ function exportImage(filename, I::AbstractMatrix)
   save(filename, Icolored )
 end
 
+include("MotionCompensation.jl")
 include("Reconstruction.jl")
 include("MultiPatch.jl")
 include("MultiGradient.jl")
@@ -59,4 +60,3 @@ include("Sparse.jl")
 include("SMCenter.jl")
 include("LoadSaveMDF.jl")
 include("SMRecovery.jl")
-include("MotionCompensation.jl")

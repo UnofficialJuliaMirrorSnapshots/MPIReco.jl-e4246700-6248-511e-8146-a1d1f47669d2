@@ -1,50 +1,77 @@
 export reconstructionPeriodicMotion
 
+function reconstructionPeriodicMotion(bSF::MPIFile, bMeas::MPIFile;
+  minFreq=0, maxFreq=1.25e6, SNRThresh=-1,maxMixingOrder=-1, numUsedFreqs=-1, sortBySNR=false, recChannels=1:numReceivers(bMeas), kargs...)
+
+  freq = filterFrequencies(bSF,minFreq=minFreq, maxFreq=maxFreq,recChannels=recChannels, SNRThresh=SNRThresh, numUsedFreqs=numUsedFreqs, sortBySNR=sortBySNR)
+
+  @debug "selecting $(length(freq)) frequencies"
+
+  return reconstructionPeriodicMotion(bSF, bMeas, freq; kargs...)
+end
+
+
 """
 	reconstructionPeriodicMotion(b::MPIFile, bSF::MPIFile, bBG::MPIFile, frBG::Array{UnitRange{Int64},1}, choosePeak::Int64, sigma::Float64, freq::Array{Int64,1},recoFrame::Int64;lambd=0.1,iterations=2,samplingPrecision=true,windowFunction=1,bSFFrequencyAnalysis=bSF)
 
 	Performs multi-patch reconstruction of raw data from an object with periodic motion
 
-- b:			Raw data
-- bSF:			System function for reconstruction
-- bBG:			Background measurement
+- bSF:			System functions for reconstruction
+- bMeas:		Raw data of the measurement
+- freq:                 Selected frequencies for reconstruction
+- bEmpty:		Background measurement
 - frBG:			Background frames
 - choosePeak:		Number of chosen peak for motion frequency
-- sigma:                Window width for spectral leakage correction sigma = 1 <=> 3*DF repetition time
-- freq:                 Selected frequencies for reconstruction
+- alpha:                Window width for spectral leakage correction alpha = 1 <=> 3*DF repetition time
 - recoFrame: 		Selected frame
-- lambd:		Regularization parameter for reconstruction
+- lambda:		Regularization parameter for reconstruction
 - iterations:		Number of iterations
 - samplingPrecision:    true: rounding motion period to sampling precision, false: rounding to DF period precision
-- windowFunction:       1: Hann window, 2:FT1A05, 3: Rectangle+
+- windowFunction:       1: Hann window, 2:FT1A05, 3: Rectangle
 - bSFFrequencyAnalysis: System function for frequency analysis
 
 """
-function reconstructionPeriodicMotion(b::MPIFile, bSF::MPIFile, bBG::MPIFile,
-	                    frBG::Array{UnitRange{Int64},1}, choosePeak::Int64,
-						sigma::Float64, freq::Array{Int64,1},recoFrame::Int64;
-						lambda=0.1, iterations=2, samplingPrecision=true, windowType=1,
-						bSFFrequencyAnalysis=bSF)
+function reconstructionPeriodicMotion(bSF::MPIFile, bMeas::MPIFile, freq::Array{Int64,1};
+				bEmpty=nothing, frBG=nothing, 
+				alpha::Float64=1.0, choosePeak::Int64=1, recoFrame::Int64=1,
+				samplingPrecision::Bool=true, windowType::Int64=1,
+				bSFFrequencyAnalysis::MPIFile=bSF,higherHarmonic::Int64=1,
+				kargs...)
 
-  FFP = ffPos(b)
+  FFP = squeeze(acqOffsetFieldShift(bMeas))
 
-  uBG = getMeasurementsFD(bBG, frequencies=freq, frames=1, numAverages=1, spectralLeakageCorrection=true)
+  motFreq = getMotionFreq(bSFFrequencyAnalysis,bMeas,choosePeak)./higherHarmonic
+  tmot = getRepetitionsOfSameState(bMeas,motFreq,recoFrame,recoFrame)
 
-  motFreq = getMotionFreq(b,bSFFrequencyAnalysis,choosePeak)
-  tmot = getRepetitionsOfSameState(motFreq,b,recoFrame,recoFrame)
-
-  resortedInd = unflattenOffsetFieldShift(FFP)[:,1:floor(Int,getPeriod(b, motFreq[1,1]))]
-  uReco = getavrgusubPeriod(motFreq, tmot, b, freq, recoFrame, recoFrame, sigma,
+  # sort measured data in virtual frames
+  uReco = getMeasurementsMotionCompFD(bMeas, motFreq, tmot, freq, recoFrame, recoFrame, alpha,
                             samplingPrecision, windowType)
   #println(size(uReco))
-  for i=1:acqNumPatches(b)
-    uReco[:,i,:] = uReco[:,i,:] .- mean(uBG[:,frBG[i],:], dims=2)
+  # subtract background measurement
+  if bEmpty != nothing
+    uEmpty = getMeasurementsFD(bEmpty, frequencies=freq, frames=1, numAverages=1, spectralLeakageCorrection=true)
+    if frBG == nothing
+      numFrames = Int(acqNumPeriods(bBG)/acqNumFrames(bBG)/acqNumPatches(bBG))
+      frBG = [1+(i-1)*numFrames:i*numFrames for i=1:acqNumPatches(bBG)]
+    end
+    for i=1:acqNumPatches(bMeas)
+      uReco[:,i,:] = uReco[:,i,:] .- mean(uEmpty[:,frBG[i],:], dims=2)
+    end
   end
-  mapping = ones(Int,acqNumPatches(b))
-  FFOp = MultiPatchOperator(bSF, b, freq, false,
-					indFFPos=resortedInd[:,1],
-					FFPos=FFP[:,resortedInd[:,1]], mapping=mapping, FFPosSF=FFP[:,resortedInd[:,1]])
+  
+  mapping = collect(1:acqNumPatches(bMeas)) #ones(Int,acqNumPatches(bMeas))
+  resortedInd = zeros(Int64,acqNumPatches(bMeas),floor(Int,getPeriod(bMeas, motFreq[1,1])))
+  for i=1:acqNumPatches(bMeas)
+    resortedInd[i,:] = unflattenOffsetFieldShift(FFP)[i][1:floor(Int,getPeriod(bMeas, motFreq[1,1]))]
+  end
+  FFOp = MultiPatchOperator(bSF, bMeas, freq, false,
+			    indFFPos=resortedInd[:,1],
+			    FFPos=FFP[:,resortedInd[:,1]], mapping=mapping, 
+			    FFPosSF=FFP[:,resortedInd[:,1]])
+  
+  image = initImage(bSF[1],bMeas,size(uReco,3),acqNumAverages(bMeas),FFOp.grid,false)
+  c =  reconstruction(FFOp, uReco; kargs...)
+  writePartToImage!(image, c, 1, 1:size(uReco,3), acqNumAverages(bMeas))
 
- c_ =  reconstruction(FFOp, uReco, λ=lambda, iterations=iterations)
- return reshape(c_, shape(FFOp.grid)..., :)
+  return image
 end

@@ -17,51 +17,51 @@ function findComponentsWithSignifFreq(u)
 end
 
 """
-    getMotionFreq(b::MPIFile, bSF::MPIFile, choosePeak::Int)
+    getMotionFreq(bSF::MPIFile, bMeas::MPIFile, choosePeak::Int)
 
 Determines frequency [Hz] of signal modulation for each patch and frame
 
 ...
-- `b::MPIFile`: measurement
 - `bSF::MPIFile`: Systemfunction ==> required because the motion frequency is only determined from components with high SNR
+- `bMeas::MPIFile`: measurement
 - `choosePeak::Int`: Within the measurement signal different modulations can be found and also higher harmonics.
  Choose the number of the peak you want
 ...
 """
-function getMotionFreq(b::MPIFile, bSF::MPIFile, choosePeak::Int)
-    snrthresh = 10
-    recChannels=[2]
-    freqs = filterFrequencies(bSF,SNRThresh=snrthresh,minFreq=80e3,recChannels=recChannels)
-    repFreq = 1 / dfCycle(b);
+function getMotionFreq(bSF::MPIFile, bMeas::MPIFile, choosePeak::Int,
+		       SNRThreshMF = 10, minFreqMF = 80e3, recChannelsMF = [2]) # frequency selection
+
+    freqs = filterFrequencies(bSF,SNRThresh=SNRThreshMF,minFreq=minFreqMF,recChannels=recChannelsMF)
+    repFreq = 1 / dfCycle(bMeas);
     peaksInHz = 0
-    selectedPeakInHz = zeros(acqNumFrames(b),acqNumPatches(b))
-    uspec = getMeasurementsFD(b, frequencies=freqs, numAverages=1, spectralLeakageCorrection=false)
-    norm, ind = findComponentsWithSignifFreq(squeeze(uspec[:,1:acqNumPeriodsPerPatch(b),1]))
-    @info "Maximum freq" ind
+    selectedPeakInHz = zeros(acqNumFrames(bMeas),acqNumPatches(bMeas))
+    uspec = getMeasurementsFD(bMeas, frequencies=freqs, numAverages=1, spectralLeakageCorrection=false)
+    norm, ind = findComponentsWithSignifFreq(squeeze(uspec[:,1:acqNumPeriodsPerPatch(bMeas),1]))
+    @debug "Maximum freq" ind
 
-	for j=1:acqNumFrames(b)
-    	for i = 1:acqNumPatches(b)
-        	uFT = generateSpectrum(squeeze(uspec[ind,(i-1)*acqNumPeriodsPerPatch(b)+1:i*acqNumPeriodsPerPatch(b),j]))
-        	frind = collect(1:acqNumPeriodsPerPatch(b)/2)
-       		frHz = bins2hertz(frind,repFreq,acqNumPeriodsPerPatch(b))
+	for j=1:acqNumFrames(bMeas)
+    	for i = 1:acqNumPatches(bMeas)
+        	uFT = generateSpectrum(squeeze(uspec[ind,(i-1)*acqNumPeriodsPerPatch(bMeas)+1:i*acqNumPeriodsPerPatch(bMeas),j]))
+        	frind = collect(1:acqNumPeriodsPerPatch(bMeas)/2)
+       		frHz = bins2hertz(frind,repFreq,acqNumPeriodsPerPatch(bMeas))
 
-            peaksInInt=findPeaks(uFT,stdTh=1)
-            peaksInHz = bins2hertz(peaksInInt,1000/21.54,acqNumPeriodsPerPatch(b))
-            @info "Found peaks: " peaksInHz
+            peaksInInt = findPeaks(uFT,stdTh=1)
+            peaksInHz = bins2hertz(peaksInInt, 1/dfCycle(bMeas), acqNumPeriodsPerPatch(bMeas))
+            @debug "Found peaks: " peaksInHz
 
 			selectedPeak = parabelMax(parabelFit(peaksInInt[choosePeak]-1:peaksInInt[choosePeak]+1,log.(uFT[peaksInInt[choosePeak]-1:peaksInInt[choosePeak]+1])))
-			selectedPeakInHz[j,i] = bins2hertz(selectedPeak,repFreq,acqNumPeriodsPerPatch(b))
+			selectedPeakInHz[j,i] = bins2hertz(selectedPeak,repFreq,acqNumPeriodsPerPatch(bMeas))
 		end
     end
     return selectedPeakInHz
 end
 
 """
-    findNFreqwithhighestSNRinfreqs(bSF, freqs, N)
+    findNFreqwithhighestSNRinfreqs(bSF::MPIFile, freqs, N)
 
 Return indices of N frequency components with highest SNR.
 """
-function findNFreqwithhighestSNRinfreqs(bSF, freqs, N)
+function findNFreqwithhighestSNRinfreqs(bSF::MPIFile, freqs, N)
 
   snr_freq = reshape(getSNR(bSF),size(getSNR(bSF),1)*3,1)
   indinfreqs = Int[]
@@ -290,9 +290,9 @@ function enforceMinDistanceOfPeaks(diracpeaks, minBinDist, data)
       push!(keep,true) # append last index
       # keep the greater ones
       rem = findall(.!keep)
-      println(rem)
+      @debug rem
       for i in rem
-	      println(diracpeaks[i])
+	  @debug diracpeaks[i]
           if data[diracpeaks[i]] > data[diracpeaks[i+1]]
               keep[i] = true
               keep[i+1] = false
