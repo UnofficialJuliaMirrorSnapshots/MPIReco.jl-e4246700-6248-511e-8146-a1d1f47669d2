@@ -9,6 +9,7 @@ DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 DistributedArrays = "aaf54ef3-cdf8-58ed-94cc-d582ad619b94"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+IniFile = "83e8ac13-25f8-5344-8a64-a9f2b223428f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LinearOperators = "5c8ed15e-5a4c-59e4-a42b-c7e8811fb125"
 MPIFiles = "371237a9-e6c1-5201-9adb-3d8cfa78fa9f"
@@ -21,7 +22,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 MPIFiles = ">= 0.5.2"
 RegularizedLeastSquares = ">= 0.2.3"
-julia = "1.0"
+julia = "0.7, 1.0"
 
 [extras]
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
