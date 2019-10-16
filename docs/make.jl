@@ -1,4 +1,5 @@
-using Documenter, MPIReco
+import ImageMagick
+using MPIReco, Documenter
 
 makedocs(
     format = :html,
